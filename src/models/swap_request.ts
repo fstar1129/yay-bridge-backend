@@ -16,7 +16,7 @@ interface ISwapRequest {
   is_cardano: boolean,
   receiver_address: string,
   cardano_hot_wallet: string,
-  cardano_hot_wallet_private_key: string,
+  cardano_hot_wallet_address: string,
   eth_hot_wallet: string,
   eth_hot_wallet_private_key: string,
   status: string,
@@ -33,7 +33,7 @@ interface SwapRequestDoc extends mongoose.Document {
   is_cardano: boolean,
   receiver_address: string,
   cardano_hot_wallet: string,
-  cardano_hot_wallet_private_key: string,
+  cardano_hot_wallet_address: string,
   eth_hot_wallet: string,
   eth_hot_wallet_private_key: string,
   status: string,
@@ -61,7 +61,7 @@ const SwapRequestSchema = new mongoose.Schema({
     type: String,
     required: false
   },
-  cardano_hot_wallet_private_key: {
+  cardano_hot_wallet_address: {
     type: String,
     required: false
   },
