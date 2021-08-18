@@ -1,5 +1,6 @@
 import { Response, Request, json } from "express";
 import { ethers } from 'ethers';
+import crypto from 'crypto';
 
 const { generateMnemonic } = require('../utils/utils');
 import { SwapRequest } from '../models/swap_request';
@@ -7,7 +8,19 @@ import BadRequestError from "../exceptions/BadRequestError";
 import { http } from "./http";
 import * as luxon from 'luxon';
 
+// Cardano Yay Policy Id
+const YAY_POLICY_ID = '57684adcb032c8dbc40179841bed987d8dee7472617a0e5c25ef4140';
 
+
+// Ethereum YAY address
+const YAY_ADDRESS = '0xc7ad46e0b8a400bb3c915120d284aafba8fc4735'
+const YAY_ABI = [
+  "function balanceOf(address owner) view returns (uint256)",
+  "function transfer(address to, uint amount) returns (boolean)"
+]
+
+// fixed fee
+const fee = 10;
 
 export const checkAndUpdateSwapRequest = async (req: Request, res: Response) => {
 	try {
@@ -20,25 +33,19 @@ export const checkAndUpdateSwapRequest = async (req: Request, res: Response) => 
       if (expire_time > current_time) {
         if (data.is_cardano) {
           let cardanoData = await http.get<any>(`/wallets/${data.cardano_hot_wallet}`);
-          console.log('walletData: ', cardanoData);
+          console.log('walletData: ', cardanoData.data.assets.available);
           if (cardanoData.data.assets.available.length > 0) {
-            if (cardanoData.data.assets.available[0].policy_id === "57684adcb032c8dbc40179841bed987d8dee7472617a0e5c25ef4140" &&
+            if (cardanoData.data.assets.available[0].policy_id === YAY_POLICY_ID &&
               cardanoData.data.assets.available[0].quantity == parseFloat(data.amount)) {
-              data.status = "confirmed";
-              await data.save();
+              
+
               // send ethereum token
-              const fee = 10;
+              // ropsten provider
               const provider = ethers.getDefaultProvider('ropsten')
               const WALLET = data.receiver_address // ADD YOUR WALLET ADDRESS HERE
 
               let wallet = new ethers.Wallet(process.env.PRIVATE_KEY || 'fdsafdas', provider)
               wallet = wallet.connect(provider)
-
-              const YAY_ADDRESS = '0xc7ad46e0b8a400bb3c915120d284aafba8fc4735' // Ropsten YAY address
-              const YAY_ABI = [
-                "function balanceOf(address owner) view returns (uint256)",
-                "function transfer(address to, uint amount) returns (boolean)"
-              ]
 
               const yay = new ethers.Contract(YAY_ADDRESS, YAY_ABI, wallet);
               const getYayBalance = async () => {
@@ -61,6 +68,8 @@ export const checkAndUpdateSwapRequest = async (req: Request, res: Response) => 
               } catch (e) {
                 return res.status(201).send({status: 'no_enough_pYay_balance'});
               }
+              data.status = "confirmed";
+              await data.save();
               return res.status(201).send({status: 'confirmed'});
             } else {
               return res.status(201).send({status: 'no_yay_received'});
@@ -69,7 +78,44 @@ export const checkAndUpdateSwapRequest = async (req: Request, res: Response) => 
             return res.status(201).send({status: 'no_yay_received'});
           }
         } else { // if ethereum
-          
+          // eth balance check
+          const provider = ethers.getDefaultProvider('ropsten');
+          const yay = new ethers.Contract(YAY_ADDRESS, YAY_ABI, provider);
+          let balance = await yay.balanceOf(data.eth_hot_wallet);
+          balance = ethers.utils.formatEther(balance);
+
+          if (balance == data.amount) {
+            // send transaction on cardano
+            try {
+              let cardanoData = await http.post<any>(`/wallets/${process.env.CardanoWalletId}/transactions`, {
+                payments: [
+                  {
+                    address: data.receiver_address,
+                    amount: {
+                      quantity: 0,
+                      unit: "lovelace"
+                    },
+                    assets: [
+                      {
+                        policy_id: YAY_POLICY_ID,
+                        asset_name: "",
+                        quantity: parseFloat(data.amount) -fee
+                      }
+                    ]
+                  }
+                ],
+                passphrase: process.env.CardanoPassPhrase
+              });
+            } catch (e) {
+              return res.status(201).send({status: 'no_enough_yay_balance'});
+            }
+
+            data.status = "confirmed";
+            await data.save();
+            return res.status(201).send({status: 'confirmed'});
+          } else {
+            return res.status(201).send({status: 'no_yay_received'});
+          }
         }
       } else {
         data.status = "expired";
@@ -113,7 +159,10 @@ export const createSwapRequest = async (req: Request, res: Response) => {
       console.log('cardanoWalletAddress: ', cardanoData.data[0].id);
       data.cardano_hot_wallet_address = cardanoData.data[0].id;
     } else { // if ethereum
-
+      const id = crypto.randomBytes(32).toString('hex');
+      const privateKey = "0x"+id;
+      const wallet = new ethers.Wallet(privateKey);
+      data.eth_hot_wallet = wallet.address;
     }
 
     await data.save();
