@@ -2,18 +2,17 @@ import { Response, Request, json } from "express";
 import { ethers } from 'ethers';
 import crypto from 'crypto';
 import axios from 'axios';
+import * as luxon from 'luxon';
 
 const { generateMnemonic } = require('../utils/utils');
 import { SwapRequest } from '../models/swap_request';
 import BadRequestError from "../exceptions/BadRequestError";
 import { http } from "./http";
-import * as luxon from 'luxon';
 
 // Cardano Yay Policy Id
 const YAY_POLICY_ID = '57684adcb032c8dbc40179841bed987d8dee7472617a0e5c25ef4140';
 const YAY_UNIT_ID = '57684adcb032c8dbc40179841bed987d8dee7472617a0e5c25ef414059617953776170';
 const YAY_ASSET_NAME = '59617953776170';
-
 
 // Ethereum YAY address
 const YAY_ADDRESS = '0x88c9349293d5a69e083d4cf42b343aa00b5d58b8'
@@ -22,7 +21,7 @@ const YAY_ABI = [
   "function transfer(address to, uint amount) returns (boolean)"
 ]
 
-// fixed fee
+// Fixed fee
 const FEE = parseFloat(process.env.FEE || '1');
 
 export const checkAndUpdateSwapRequest = async (req: Request, res: Response) => {
