@@ -1,6 +1,7 @@
 import { Response, Request, json } from "express";
 import { ethers } from 'ethers';
 import crypto from 'crypto';
+import axios from 'axios';
 
 const { generateMnemonic } = require('../utils/utils');
 import { SwapRequest } from '../models/swap_request';
@@ -10,65 +11,64 @@ import * as luxon from 'luxon';
 
 // Cardano Yay Policy Id
 const YAY_POLICY_ID = '57684adcb032c8dbc40179841bed987d8dee7472617a0e5c25ef4140';
+const YAY_UNIT_ID = '57684adcb032c8dbc40179841bed987d8dee7472617a0e5c25ef414059617953776170';
+const YAY_ASSET_NAME = '59617953776170';
 
 
 // Ethereum YAY address
-const YAY_ADDRESS = '0xc7ad46e0b8a400bb3c915120d284aafba8fc4735'
+const YAY_ADDRESS = '0x88c9349293d5a69e083d4cf42b343aa00b5d58b8'
 const YAY_ABI = [
   "function balanceOf(address owner) view returns (uint256)",
   "function transfer(address to, uint amount) returns (boolean)"
 ]
 
 // fixed fee
-const fee = 10;
+const FEE = parseFloat(process.env.FEE || '1');
 
 export const checkAndUpdateSwapRequest = async (req: Request, res: Response) => {
 	try {
 		const { swap_id } = req.body;
-    const data = await SwapRequest.findById(swap_id);
+    let data = await SwapRequest.findById(swap_id);
 
     if (data) {
       const current_time = luxon.DateTime.utc();
-      const expire_time = luxon.DateTime.fromISO(data.request_time, { zone: "UTC"}).plus({minute: 20});
+      const expire_time = luxon.DateTime.fromISO(data.request_time, { zone: "UTC"}).plus({minute: 30});
       if (expire_time > current_time) {
         if (data.is_cardano) {
-          let cardanoData = await http.get<any>(`/wallets/${data.cardano_hot_wallet}`);
-          console.log('walletData: ', cardanoData.data.assets.available);
-          if (cardanoData.data.assets.available.length > 0) {
-            if (cardanoData.data.assets.available[0].policy_id === YAY_POLICY_ID &&
-              cardanoData.data.assets.available[0].quantity == parseFloat(data.amount)) {
-              
-
+          let config = {
+            headers: {
+              project_id: process.env.BLOCKFROST_PROJECT_ID,
+            }
+          };
+          const blockfrostUrl = process.env.BLOCKFROST_API_URL || 'https://cardano-mainnet.blockfrost.io/api/v0';
+          const blockfrostData = await axios.get(`${blockfrostUrl}/addresses/${data.cardano_hot_wallet_address}`, config);
+          // let cardanoData = await http.get<any>(`/wallets/${data.cardano_hot_wallet}`);
+          console.log('walletData: ', blockfrostData.data.amount);
+          if (blockfrostData.data.amount.length > 0) {
+            if (blockfrostData.data.amount[1].unit === YAY_UNIT_ID &&
+              blockfrostData.data.amount[1].quantity == parseFloat(data.amount)) {
               // send ethereum token
               // ropsten provider
-              const provider = ethers.getDefaultProvider('ropsten')
-              const WALLET = data.receiver_address // ADD YOUR WALLET ADDRESS HERE
-
-              let wallet = new ethers.Wallet(process.env.PRIVATE_KEY || 'fdsafdas', provider)
+              const provider = new ethers.providers.JsonRpcProvider(`https://ropsten.infura.io/v3/${process.env.INFURA_KEY}`);
+              let wallet = new ethers.Wallet(process.env.ETHEREUM_WALLET_PRIVATE_KEY || '', provider)
               wallet = wallet.connect(provider)
 
               const yay = new ethers.Contract(YAY_ADDRESS, YAY_ABI, wallet);
-              const getYayBalance = async () => {
-                let balance = await yay.balanceOf(wallet.address)
-                balance = ethers.utils.formatEther(balance)
-                console.log(balance, 'YAY')
-              }
-              const sendYay = async () => {
-                console.log('Balance before transfer')
-                await getYayBalance()
-                const to = data.receiver_address // Add your 2nd wallet address here...
-                const amount = ethers.utils.parseUnits((parseFloat(data.amount) - fee).toString(), 18); // 1 Dai
-                const tx = await yay.transfer(to, amount)
-                await tx.wait()
-                console.log('Yay Transferred!')
-                await getYayBalance()
-              }
+              let balance = await yay.balanceOf(wallet.address);
+              balance = ethers.utils.formatEther(balance);
+              console.log('Balance before transfer');
+              console.log(balance, 'YAY');
+              const to = data.receiver_address // Add your 2nd wallet address here...
+              const amount = ethers.utils.parseUnits((parseFloat(data.amount) - FEE).toString(), 18); // send YAY
               try {
-                await sendYay();
+                await yay.transfer(to, amount);
+                console.log('Yay Transferred!');
               } catch (e) {
+                console.log(e);
                 return res.status(201).send({status: 'no_enough_pYay_balance'});
               }
               data.status = "confirmed";
+              console.log('data', data);
               await data.save();
               return res.status(201).send({status: 'confirmed'});
             } else {
@@ -83,11 +83,12 @@ export const checkAndUpdateSwapRequest = async (req: Request, res: Response) => 
           const yay = new ethers.Contract(YAY_ADDRESS, YAY_ABI, provider);
           let balance = await yay.balanceOf(data.eth_hot_wallet);
           balance = ethers.utils.formatEther(balance);
+          console.log('balance: ', balance);
 
-          if (balance == data.amount) {
+          if (balance == parseFloat(data.amount)) {
             // send transaction on cardano
             try {
-              let cardanoData = await http.post<any>(`/wallets/${process.env.CardanoWalletId}/transactions`, {
+              let cardanoData = await http.post<any>(`/wallets/${process.env.CARDANO_WALLET_ID}/transactions`, {
                 payments: [
                   {
                     address: data.receiver_address,
@@ -98,14 +99,15 @@ export const checkAndUpdateSwapRequest = async (req: Request, res: Response) => 
                     assets: [
                       {
                         policy_id: YAY_POLICY_ID,
-                        asset_name: "",
-                        quantity: parseFloat(data.amount) -fee
+                        asset_name: YAY_ASSET_NAME,
+                        quantity: parseFloat(data.amount) - FEE
                       }
                     ]
                   }
                 ],
-                passphrase: process.env.CardanoPassPhrase
+                passphrase: process.env.CARDANO_PASS_PHRASE
               });
+              console.log("txData: ", cardanoData);
             } catch (e) {
               return res.status(201).send({status: 'no_enough_yay_balance'});
             }
@@ -126,8 +128,8 @@ export const checkAndUpdateSwapRequest = async (req: Request, res: Response) => 
       return res.status(201).send({status: 'no_swap_id'});
     }
 	}
-	
 	catch (error) {
+    console.log(error);
 		if (error.code === 11000) {
 			return res.status(400).send(new BadRequestError("ID and/or username already exist."));
 		}
@@ -140,7 +142,7 @@ export const checkAndUpdateSwapRequest = async (req: Request, res: Response) => 
 export const createSwapRequest = async (req: Request, res: Response) => {
 	try {
 		const { amount, is_cardano, receiver_address } = req.body;
-    const data = new SwapRequest();
+    let data = new SwapRequest();
     data.amount = amount;
     data.is_cardano = is_cardano;
     data.receiver_address = receiver_address;
@@ -164,7 +166,6 @@ export const createSwapRequest = async (req: Request, res: Response) => {
       const wallet = new ethers.Wallet(privateKey);
       data.eth_hot_wallet = wallet.address;
     }
-
     await data.save();
     return res.status(201).send(data);
 	}
@@ -178,26 +179,3 @@ export const createSwapRequest = async (req: Request, res: Response) => {
 		}
 	}
 };
-
-// export const updateClaim = async (req: Request, res: Response) => {
-// 	try {
-// 		const { _id } = req.body;
-//     const data = await AcceptedAddress.findById(_id);
-//     if (data) {
-//       data.reinvestable = false;
-
-//       await data.save();
-//       return res.status(201).send(data);
-//     }
-// 	}
-
-// 	catch (error) {
-// 		if (error.code === 11000) {
-// 			return res.status(400).send(new BadRequestError("ID and/or username already exist."));
-// 		}
-// 		else {
-// 			console.error(error);
-// 			return res.status(400).send(new BadRequestError("Bad Request."));
-// 		}
-// 	}
-// };
