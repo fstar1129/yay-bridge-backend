@@ -21,9 +21,6 @@ const YAY_ABI = [
   "function transfer(address to, uint amount) returns (boolean)"
 ]
 
-// Fixed fee
-const FEE = parseFloat(process.env.FEE || '1');
-
 export const checkAndUpdateSwapRequest = async (req: Request, res: Response) => {
 	try {
 		const { swap_id } = req.body;
@@ -58,7 +55,7 @@ export const checkAndUpdateSwapRequest = async (req: Request, res: Response) => 
               console.log('Balance before transfer');
               console.log(balance, 'YAY');
               const to = data.receiver_address // Add your 2nd wallet address here...
-              const amount = ethers.utils.parseUnits((parseFloat(data.amount) - FEE).toString(), 18); // send YAY
+              const amount = ethers.utils.parseUnits((parseFloat(data.amount) - parseFloat(process.env.FEE || '1')).toString(), 18); // send YAY
               try {
                 await yay.transfer(to, amount);
                 console.log('Yay Transferred!');
@@ -99,7 +96,7 @@ export const checkAndUpdateSwapRequest = async (req: Request, res: Response) => 
                       {
                         policy_id: YAY_POLICY_ID,
                         asset_name: YAY_ASSET_NAME,
-                        quantity: parseFloat(data.amount) - FEE
+                        quantity: parseFloat(data.amount) - parseFloat(process.env.FEE || '1')
                       }
                     ]
                   }
@@ -140,6 +137,7 @@ export const checkAndUpdateSwapRequest = async (req: Request, res: Response) => 
 
 export const createSwapRequest = async (req: Request, res: Response) => {
 	try {
+    console.log(process.env.FEE || 1);
 		const { amount, is_cardano, receiver_address } = req.body;
     let data = new SwapRequest();
     data.amount = amount;
