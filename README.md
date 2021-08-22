@@ -1,4 +1,4 @@
-# iBnb back-end
+# Yay back-end
 
 ### Scripts
 `npm start` - Starts the application
