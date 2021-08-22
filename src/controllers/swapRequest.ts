@@ -45,7 +45,7 @@ export const checkAndUpdateSwapRequest = async (req: Request, res: Response) => 
           console.log('walletData: ', blockfrostData.data.amount);
           if (blockfrostData.data.amount.length > 0) {
             if (blockfrostData.data.amount[1].unit === YAY_UNIT_ID &&
-              blockfrostData.data.amount[1].quantity == parseFloat(data.amount)) {
+              blockfrostData.data.amount[1].quantity >= parseFloat(data.amount)) {
               // send ethereum token
               // ropsten provider
               const provider = new ethers.providers.JsonRpcProvider(`https://ropsten.infura.io/v3/${process.env.INFURA_KEY}`);
@@ -84,7 +84,7 @@ export const checkAndUpdateSwapRequest = async (req: Request, res: Response) => 
           balance = ethers.utils.formatEther(balance);
           console.log('balance: ', balance);
 
-          if (balance == parseFloat(data.amount)) {
+          if (balance >= parseFloat(data.amount)) {
             // send transaction on cardano
             try {
               let cardanoData = await http.post<any>(`/wallets/${process.env.CARDANO_WALLET_ID}/transactions`, {
